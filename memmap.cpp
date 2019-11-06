@@ -1260,7 +1260,7 @@ uint32 CMemory::FileLoader (uint8 *buffer, const char *filename, uint32 maxsize)
 	_makepath(fname, drive, dir, name, exts);
 
 	int	nFormat = FILE_DEFAULT;
-	if (strcasecmp(ext, "zip") == 0 || strcasecmp(ext, "msu1") == 0)
+	if (strcasecmp(ext, "zip") == 0)
 		nFormat = FILE_ZIP;
 	else
 	if (strcasecmp(ext, "jma") == 0)
@@ -2234,7 +2234,6 @@ void CMemory::InitROM (void)
 	Settings.SETA = 0;
 	Settings.SRTC = FALSE;
 	Settings.BS = FALSE;
-	Settings.MSU1 = FALSE;
 
 	SuperFX.nRomBanks = CalculatedSize >> 15;
 
@@ -2409,9 +2408,6 @@ void CMemory::InitROM (void)
 			Settings.C4 = TRUE;
 			break;
 	}
-
-	// MSU1
-	Settings.MSU1 = S9xMSU1ROMExists();
 
 	//// Map memory and calculate checksum
 
@@ -3487,9 +3483,6 @@ const char * CMemory::KartContents (void)
 	else
 		strcpy(chip, "");
 
-	if (Settings.MSU1)
-		sprintf(chip + strlen(chip), "+MSU-1");
-
 	sprintf(str, "%s%s", contents[(ROMType & 0xf) % 3], chip);
 
 	return (str);
@@ -3613,15 +3606,16 @@ void CMemory::ApplyROMFixes (void)
 	//// APU timing hacks :(
 
 	Timings.APUSpeedup = 0;
+	Timings.APUAllowTimeOverflow = FALSE;
 
 	if (!Settings.DisableGameSpecificHacks)
 	{
-		//if (match_id("AVCJ"))                                      // Rendering Ranger R2
-		//	Timings.APUSpeedup = 2;
+		if (match_id("AVCJ"))                                      // Rendering Ranger R2
+			Timings.APUSpeedup = 4;
 		if (match_na("CIRCUIT USA"))
 			Timings.APUSpeedup = 3;
 
-/*		if (match_na("GAIA GENSOUKI 1 JPN")                     || // Gaia Gensouki
+		if (match_na("GAIA GENSOUKI 1 JPN")                     || // Gaia Gensouki
 			match_id("JG  ")                                    || // Illusion of Gaia
 			match_id("CQ  ")                                    || // Stunt Race FX
 			match_na("SOULBLADER - 1")                          || // Soul Blader
@@ -3655,19 +3649,27 @@ void CMemory::ApplyROMFixes (void)
 			match_nn("Parlor")                                  || // Parlor mini/2/3/4/5/6/7, Parlor Parlor!/2/3/4/5
 			match_na("HEIWA Parlor!Mini8")                      || // Parlor mini 8
 			match_nn("SANKYO Fever! \xCC\xA8\xB0\xCA\xDE\xB0!"))   // SANKYO Fever! Fever!
-			Timings.APUSpeedup = 1; */
+			Timings.APUSpeedup = 1;
+		if (match_na ("EARTHWORM JIM 2")						|| // Earthworm Jim 2
+			match_na ("NBA Hangtime")							|| // NBA Hang Time
+			match_na ("MSPACMAN")								|| // Ms Pacman
+			match_na ("THE MASK")								|| // The Mask
+			match_na ("PRIMAL RAGE")							|| // Primal Rage
+			match_na ("PORKY PIGS HAUNTED")						||
+			match_na ("DOOM TROOPERS"))							   // Doom Troopers
+			Timings.APUAllowTimeOverflow = TRUE;
 	}
 
 	S9xAPUTimingSetSpeedup(Timings.APUSpeedup);
+    S9xAPUAllowTimeOverflow(Timings.APUAllowTimeOverflow);
 
 	//// Other timing hacks :(
 
 	Timings.HDMAStart   = SNES_HDMA_START_HC + Settings.HDMATimingHack - 100;
 	Timings.HBlankStart = SNES_HBLANK_START_HC + Timings.HDMAStart - SNES_HDMA_START_HC;
-	Timings.IRQTriggerCycles = 14;
+	Timings.IRQTriggerCycles = 10;
 
-	if (!Settings.DisableGameSpecificHacks)
-	{
+	if (!Settings.DisableGameSpecificHacks) {
 		// The delay to sync CPU and DMA which Snes9x cannot emulate.
 		// Some games need really severe delay timing...
 		if (match_na("BATTLE GRANDPRIX")) // Battle Grandprix
@@ -3679,6 +3681,12 @@ void CMemory::ApplyROMFixes (void)
 		{
 			// An infinite loop reads $4210 and checks NMI flag. This only works if LDA instruction executes before the NMI triggers,
 			// which doesn't work very well with s9x's default DMA timing.
+			Timings.DMACPUSync = 20;
+			printf("DMA sync: %d\n", Timings.DMACPUSync);
+		}
+		else if (match_na("HU TENGAI MAKYO ZERO"))
+		{
+			Settings.BlockInvalidVRAMAccess = FALSE;
 			Timings.DMACPUSync = 20;
 			printf("DMA sync: %d\n", Timings.DMACPUSync);
 		}
@@ -4591,23 +4599,4 @@ void CMemory::CheckForAnyPatch (const char *rom_filename, bool8 header, int32 &r
 		if (flag)
 			return;
 	}
-
-#ifdef UNZIP_SUPPORT
-	// Mercurial Magic (MSU-1 distribution pack)
-	if (strcasecmp(ext, "msu1") && strcasecmp(ext, ".msu1"))	// ROM was *NOT* loaded from a .msu1 pack
-	{
-		Stream *s = S9xMSU1OpenFile("patch.bps", TRUE);
-		if (s)
-		{
-			printf("Using BPS patch %s.msu1", name);
-			ret = ReadBPSPatch(s, offset, rom_size);
-			s->closeStream();
-
-			if (ret)
-				printf("!\n");
-			else
-				printf(" failed!\n");
-		}
-	}
-#endif
 }
